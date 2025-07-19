@@ -1,29 +1,81 @@
-pipeline { 
-    agent { label 'slave-1'}
-    
+pipeline {
+    agent any
     tools {
-        maven 'maven3'
         jdk 'jdk17'
+        maven 'maven3'
     }
-
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
     stages {
-        
+        stage('Checkout the code') {
+            steps {
+                git branch: 'main', credentialsId: 'git-cred', url: 'https://github.com/Anusuya-murugiah/FullStack-Blogging-App.git' 
+            }
+        }
         stage('Compile') {
             steps {
-            sh  "mvn compile"
+                sh 'mvn compile'
             }
-        }
-        
+        }        
         stage('Test') {
             steps {
-                sh "mvn test"
+                sh 'mvn test'
+            }        
+        }   
+        stage('Trivy image scan') {
+            steps {
+                sh 'trivy fs --format table -o fs.html .'
+            }        
+        }
+        stage('package') {
+            steps {
+                sh 'mvn package'
+            }        
+        }
+        stage('sonarqube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=blogging-app \
+                    -Dsonar.projectKey=blogging-app -Dsonar.java.binaries=target '''
+                }
             }
+        }
+        stage('build') {
+            steps {
+                sh 'mvn package'
+            }        
+        }
+        stage('Publish Artifact') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'maven-setting', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                 sh 'mvn deploy'
+              }
+            }        
+        }
+        stage('docker build') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockercred', toolName: 'docker') {
+                  sh "docker build -t anusuya211998/bloggingapp:latest ."
+                  }
+                }
+            }        
+        }
+        stage('Trivy scan') {
+            steps {
+                sh 'trivy image --format table -o image.html anusuya211998/bloggingapp:latest'
+            }        
+        }
+        stage('docker publish') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockercred', toolName: 'docker') {
+                  sh "docker push anusuya211998/bloggingapp:latest"
+                  }
+                }
+            }        
         }
         
-        stage('Package') {
-            steps {
-                sh "mvn package"
-            }
-        }
-    }
+     }
 }
