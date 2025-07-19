@@ -1,1 +1,83 @@
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_vpc" "devopshack_vpc" {
+  cidr =  "10.0.0.0/16"
+  tags = {
+    Name = "devopshack-vpc"
+ }
+}
+
+resource "aws_subnet" "devopshack_subnet" {
+   count = 2
+   vpc_id = aws_vpc.devopshack_vpc.id
+   cidr_block = cidrsubnet(aws_vpc.devopshack_vpc.cidr_block, 8, count.index)
+   availability_zone = element(["us-east-1a", "us-east-1b"],count.index)
+   map_public_ip_on_lunch = true
+  tags = {
+    Name = "devopshack-subnet-${count.index}"
+  }
+}
+
+resource "aws_internet_gateway" "devopshack_igw" {
+   vpc_id = aws_vpc.devopshack_vpc.id
+  tags = {
+    Name = "devopshack-igw"
+  }
+}
+
+resource "aws_route_table" "devopshack_route_table" {
+  vpc_id = aws_vpc.devopshack_vpc.id
+
+  route  {
+    cidr_block = "0.0.0.0/0"
+    gateway_id =  aws_internet_gateway.devopshack_igw.id 
+  }
+
+  tags = {
+    Name = "devopsshack-route-table"
+  }
+}
+
+resource "aws_route_table_associate" "a" {
+   count = 2
+   route_table_id = aws_route_table.devopshack_route_table.id
+   subnet_id = aws_subnet.devopshack_subnet[count.index].id
+}
+
+resource "aws_security_group" "devopshack_cluster_sg" {
+   vpc_id =  vpc_id = aws_vpc.devopshack_vpc.id
+   egress {
+     from_port = 0
+     to_port = 0
+     protocol = "-1"
+     cidr_block = "0.0.0.0/0
+   }
+tags = {
+    Name = "devopsshack-cluster-sg"
+  }
+}
+
+resource "aws_security_group" "devopsshack_node_sg" {
+  vpc_id = aws_vpc.devopsshack_vpc.id
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "devopsshack-node-sg"
+  }
+}
 
