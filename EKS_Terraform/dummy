@@ -3,7 +3,7 @@ provider "aws" {
 }
 
 resource "aws_vpc" "devopshack_vpc" {
-  cidr =  "10.0.0.0/16"
+  cidr_block =  "10.0.0.0/16"
   tags = {
     Name = "devopshack-vpc"
  }
@@ -14,7 +14,7 @@ resource "aws_subnet" "devopshack_subnet" {
    vpc_id = aws_vpc.devopshack_vpc.id
    cidr_block = cidrsubnet(aws_vpc.devopshack_vpc.cidr_block, 8, count.index)
    availability_zone = element(["us-east-1a", "us-east-1b"],count.index)
-   map_public_ip_on_lunch = true
+   map_public_ip_on_launch = true
   tags = {
     Name = "devopshack-subnet-${count.index}"
   }
@@ -40,27 +40,27 @@ resource "aws_route_table" "devopshack_route_table" {
   }
 }
 
-resource "aws_route_table_associate" "a" {
+resource "aws_route_table_association" "a" {
    count = 2
    route_table_id = aws_route_table.devopshack_route_table.id
    subnet_id = aws_subnet.devopshack_subnet[count.index].id
 }
 
 resource "aws_security_group" "devopshack_cluster_sg" {
-   vpc_id =  vpc_id = aws_vpc.devopshack_vpc.id
+   vpc_id = aws_vpc.devopshack_vpc.id
    egress {
      from_port = 0
      to_port = 0
      protocol = "-1"
-     cidr_block = "0.0.0.0/0
+     cidr_blocks = ["0.0.0.0/0"]
    }
 tags = {
     Name = "devopsshack-cluster-sg"
   }
 }
 
-resource "aws_security_group" "devopsshack_node_sg" {
-  vpc_id = aws_vpc.devopsshack_vpc.id
+resource "aws_security_group" "devopshack_node_sg" {
+  vpc_id = aws_vpc.devopshack_vpc.id
 
   ingress {
     from_port   = 0
@@ -81,3 +81,91 @@ resource "aws_security_group" "devopsshack_node_sg" {
   }
 }
 
+
+resource "aws_iam_role" "devopshack_cluster_role" {
+  name = "devopshack-cluster-role"
+
+  assume_role_policy = <<EOF 
+  {
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Effect": "Allow",
+        "Principal": {
+           "Service": "eks.amazonaws.com"
+         },
+       "Action": "sts:AssumeRole"
+        }
+    ]
+  }
+  EOF
+ }
+
+resource "aws_iam_role_policy_attachment" "devopsshack_cluster_role_policy" {
+   role =  aws_iam_role.devopshack_cluster_role.name
+   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_iam_role" "devopshack_node_group_role" {
+   name = "devopshack_node_group_role"
+
+  assume_role_policy = <<EOF
+  {
+  "Version": "2012-10-17", 
+  "Statement": [
+   {
+      "Effect": "Allow",
+      "Principal": {
+         "Service": "ec2.amazonaws.com"
+       },
+  "Action": "sts:AssumeRole"
+      }
+     ]
+  }
+  EOF
+}
+
+resource "aws_iam_role_policy_attachment" "devopshack_ng_node_policy" {
+    role = aws_iam_role.devopshack_node_group_role.name
+    policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "devopshack_ng_cni_policy" {
+   role = aws_iam_role.devopshack_node_group_role.name
+   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"     
+}
+
+resource "aws_iam_role_policy_attachment" "devopshack_ng_ecr_policy" {
+   role = aws_iam_role.devopshack_node_group_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_eks_cluster" "devopshack" {
+   name = "devopshack-cluster"
+   role_arn = aws_iam_role.devopshack_cluster_role.arn
+
+   vpc_config {
+   subnet_ids = aws_subnet.devopshack_subnet[*].id
+   security_group_ids = [aws_security_group.devopshack_cluster_sg.id]
+   }
+}
+
+resource "aws_eks_node_group" "devopshack_node_group_cluster" {
+   node_group_name = "devopshack-node-group"
+   cluster_name = aws_eks_cluster.devopshack.name
+   node_role_arn = aws_iam_role.devopshack_node_group_role.arn
+   subnet_ids = aws_subnet.devopshack_subnet[*].id
+
+  scaling_config {
+     desired_size = 3
+     min_size = 3
+     max_size = 3
+  }
+
+  instance_types = ["t2.large"]
+
+  remote_access {
+    ec2_ssh_key = var.ssh_key_name
+    source_security_group_ids = [aws_security_group.devopshack_node_sg.id]
+  }
+}
